@@ -1,15 +1,17 @@
-function start-main {
-    $clientid = 'CLIENTID'
-    $tenantid = 'TENANTID'
-    $token = GetDelegatedGraphToken -clientid $clientid -tenantid $tenantid
-    $usertable = listusers -token $token
-    $groups = listgroups -token $token
-    foreach ($group in $groups) {
-        $plans = listplans -groupid $group.id -token $token
+function Start-Main {
+$clientid = 'a59882b1-b19b-4a4b-a97a-3cb3b4b7ae89'
+$tenantid = '63ec59cb-94a2-4e6b-8090-be2f81176596'
+
+$token = GetDelegatedGraphToken -clientid $clientid -tenantid $tenantid
+$groups = listgroups -token $token
+foreach ($group in $groups) {
+    $plans = listplans -groupid $group.id -token $token
+    if ($plans.count -ne 0) {
         foreach ($plan in $plans) {
             exportplanner -token $token -planid $plan.id -groupid $plan.container.containerid
         }
     }
+}
 }
 function GetDelegatedGraphToken {
 
@@ -47,6 +49,7 @@ function GetDelegatedGraphToken {
 }
 
 
+#DON'T USE THIS ANYMORE
 function RunQueryandEnumerateResults {
     <#
     .SYNOPSIS
@@ -70,27 +73,39 @@ function RunQueryandEnumerateResults {
 
     #Run Graph Query
     write-host running $apiuri -foregroundcolor blue
+    $results = ""
+    $statuscode = ""
 
-    $Results = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token)" } -Uri $apiUri -Method Get)
+    do {
+        $results = ""
+        $statuscode = ""
+    do {
+        try{
+            $Results = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token)" } -Uri $apiUri -Method Get)
+            $statusCode = $results.statuscode
+        } catch {
+            $StatusCode = $_.exception.Response.StatusCode.value__
+
+            if ($statuscode -eq 429) {
+                Write-Warning "Got throttled by MS. Sleeping for 45s"
+                Start-Sleep -seconds 45
+            }
+            else {
+                write-error $_.Exception
+            }
+        }
+    } while ($statuscode -eq 429)
+
+        if ($results.Value) {
+            $resultsValue += $results.value
+        } else {
+            $resultsValue += $results
+        }
+        $apiuri = $results.'@odata.nextlink'
+    } until (!($apiuri))
 
     #Output Results for debug checking
     #write-host $results
-
-    #Begin populating results
-    $ResultsValue = $Results.value
-
-    #If there is a next page, query the next page until there are no more pages and append results to existing set
-    if ($null -ne $results."@odata.nextLink") {
-        write-host enumerating pages -ForegroundColor yellow
-        $NextPageUri = $results."@odata.nextLink"
-        ##While there is a next page, query it and loop, append results
-        While ($null -ne $NextPageUri) {
-            $NextPageRequest = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token)" } -Uri $NextPageURI -Method Get)
-            $NxtPageData = $NextPageRequest.Value
-            $NextPageUri = $NextPageRequest."@odata.nextLink"
-            $ResultsValue = $ResultsValue + $NxtPageData
-        }
-    }
 
     ##Return completed results
     return $ResultsValue 
@@ -158,12 +173,14 @@ function TestCreateFolder {
         [parameter(Mandatory = $true)]
         $directoryPath 
     )
-    if (!(Test-Path -path $directoryPath)) {  
-        New-Item -ItemType directory -Path $directoryPath
-        Write-Host "Folder path has been created successfully at: " $directoryPath 
-    }
-    else { 
-        Write-Debug "The given folder path $directoryPath already exists"; 
+    if(!(Test-Path -path $directoryPath))  
+    {  
+     New-Item -ItemType directory -Path $directoryPath
+     Write-Host "Folder path has been created successfully at: " $directoryPath 
+     }
+    else 
+    { 
+    Write-Debug "The given folder path $directoryPath already exists"; 
     }
 }
 
@@ -195,8 +212,8 @@ function ListUsers {
         $Userlist = RunQueryandEnumerateResults -token $token.accesstoken -apiUri $apiUri
     }
     $outputtable = @{}
-    foreach ($user in $userlist) {
-        $outputtable.add($user.id, $user.displayName)
+    foreach ($user in $userlist){
+        $outputtable.add($user.id,$user.displayName)
     }
     Write-host Found $grouplist.count Groups to process -foregroundcolor yellow
 
@@ -223,7 +240,7 @@ function exportplanner {
         $GroupID 
     )
 
-    $defaultcategories = get-content .\DefaultCategories.json | ConvertFrom-Json
+    $defaultcategories = get-content C:\plannermigrator\DefaultCategories.json | ConvertFrom-Json
 
     $apiUri = "https://graph.microsoft.com/beta/planner/plans/$($planid)/"
     $Plan = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token.AccessToken)" } -Uri $apiUri -Method Get)
@@ -243,7 +260,7 @@ function exportplanner {
     $buckets = RunQueryandEnumerateResults -apiUri $apiUri -token $token.accesstoken
     $bucketsTable = @{}
 
-    $buckets | ForEach-Object { $bucketstable[$_.id] = $_.name }
+    $buckets | ForEach-Object {$bucketstable[$_.id]=$_.name}
     if ($buckets) {
         $directoryPath = "c:\plannermigrator\exportdirectory\$($planname)\"
         TestCreateFolder -directoryPath $directoryPath
@@ -253,20 +270,21 @@ function exportplanner {
     $apiUri = "https://graph.microsoft.com/beta/planner/plans/$($planid)/tasks"
     $exporttasks = @()
     $tasks = RunQueryandEnumerateResults -apiUri $apiUri -token $token.accesstoken
-    if ($tasks) {
+    if ($tasks.count -ne 0) {
         $directoryPath = "c:\plannermigrator\exportdirectory\$($planname)\"
         TestCreateFolder -directoryPath $directoryPath
         $tasks  | convertto-json -depth 10 |  out-file "c:\plannermigrator\exportdirectory\$($planname)\$($planid)-tasks.json" -NoClobber -Append
         $i = 0
         $count = $tasks.count
         foreach ($task in $tasks) {
-            write-progress -activity "Exporting Tasks" -percentcomplete (($i / $count) * 100)
+            write-progress -activity "Exporting Tasks" -percentcomplete (($i/$count)*100)
             $apiUri = "https://graph.microsoft.com/beta/planner/tasks/$($task.id)/details"
-            $taskdetails = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token.AccessToken)" } -Uri $apiUri -Method Get)
+            $taskdetails = RunQueryandEnumerateResults -token $token.accesstoken -apiuri $apiuri
+            #$taskdetails = (Invoke-RestMethod -Headers @{Authorization = "Bearer $($Token.AccessToken)" } -Uri $apiUri -Method Get)
             $directoryPath = "c:\plannermigrator\exportdirectory\$($planname)\"
             TestCreateFolder -directoryPath $directoryPath
             $taskdetails  | convertto-json -depth 10 |  out-file "c:\plannermigrator\exportdirectory\$($planname)\$($task.id)-taskdetails.json" -NoClobber -Append
-            if ($null -ne $task.conversationthreadid) {
+            if($null -ne $task.conversationthreadid){
                 $apiUri = "https://graph.microsoft.com/beta/groups/$($GroupID)/threads/$($task.conversationThreadId)/posts"
                 $posts = RunQueryandEnumerateResults -apiuri $apiUri -token $token.accesstoken
 
@@ -275,10 +293,10 @@ function exportplanner {
                 foreach ($post in $posts) {
                     $sender = $post.from.emailaddress.name
                     $sentTime = get-date -date $post.receivedDateTime
-                    $body = $body + "<p>Sent By: $($sender) on $($sentTime)</p><hr>"
+                    $body=$body + "<p>Sent By: $($sender) on $($sentTime)</p><hr>"
                     $html = New-Object -ComObject "HTMLFile"
                     $html.IHTMLDocument2_write($post.body.content)
-                    $body = $body + $html.all.tags("div")[0].innerhtml
+                    $body =$body + $html.all.tags("div")[0].innerhtml
                     $body = $body + "<hr><br>"
 
                 }
@@ -291,75 +309,76 @@ function exportplanner {
 
 
             #might need to to ifs to iterate over null refs?
-            if ($null -eq $task.id) { $taskid = $task.id } else { $taskid = "" }
-            if ($null -ne $task.title) { $tasktitle = $task.title } else { $tasktitle = "" }
-            if ($null -ne $taskdetails.description) { $taskdescription = $taskdetails.description } else { $taskdescription = "" }
-            if ($null -ne $task.percentComplete) { $taskpercentComplete = $task.percentComplete } else { $taskpercentComplete = "" }
-            if ($null -ne $task.priority) { $taskpriority = $task.priority } else { $taskpriority = "" }
-            if ($null -ne $task.createddatetime) { $taskcreateddate = get-date $task.createdDateTime -format MM/dd/yyyy } else { $taskcreateddate = "" }
-            if ($null -ne $task.startdatetime) { $taskstartdate = get-date $task.startDateTime -format MM/dd/yyyy } else { $taskstartdate = "" }
-            if ($null -ne $task.duedatetime) { $taskduedate = get-date $task.dueDateTime -format MM/dd/yyyy } else { $taskduedate = "" }
-            if ($null -ne $task.completeddatetime) { $taskcompleteddate = get-date $task.completedDateTime -format MM/dd/yyyy } else { $taskcompleteddate = "" }
-            if ($null -ne $task.bucketid) { $bucketname = $bucketstable[$task.bucketid] } else { $bucketname = "" }
+            if($null -ne $task.id){$taskid = $task.id} else {$taskid = ""}
+            if($null -ne $task.title){$tasktitle = $task.title} else {$tasktitle = ""}
+            if($null -ne $taskdetails.description){$taskdescription = $taskdetails.description} else {$taskdescription = ""}
+            if($null -ne $task.percentComplete){$taskpercentComplete = $task.percentComplete} else {$taskpercentComplete = ""}
+            if($null -ne $task.priority){$taskpriority = $task.priority} else {$taskpriority = ""}
+            if($null -ne $task.createddatetime){$taskcreateddate = get-date $task.createdDateTime -format MM/dd/yyyy} else {$taskcreateddate = ""}
+            if($null -ne $task.startdatetime){$taskstartdate = get-date $task.startDateTime -format MM/dd/yyyy} else {$taskstartdate = ""}
+            if($null -ne $task.duedatetime){$taskduedate = get-date $task.dueDateTime -format MM/dd/yyyy} else {$taskduedate = ""}
+            if($null -ne $task.completeddatetime){$taskcompleteddate = get-date $task.completedDateTime -format MM/dd/yyyy} else {$taskcompleteddate = ""}
+            if($null -ne $task.bucketid){$bucketname = $bucketstable[$task.bucketid]} else {$bucketname = ""}
             $assignments = ""
-            foreach ($assignment in ($task.assignments | get-member -type noteproperty | Select-Object -expandproperty name)) {
-                $assignments = $assignments + $usertable[$assignment]
+            foreach($assignment in ($task.assignments | get-member -type noteproperty | Select-Object -expandproperty name)){
+                $assignments = $assignments + $usertable[$assignment] + "`n"
             }
             $attachments = ""
-            foreach ($attachment in ($taskdetails.references | get-member -type noteproperty | Select-Object -expandproperty name)) {
-                $attachments = $attachments + $attachment
+            foreach ($attachment in ($taskdetails.references | get-member -type noteproperty | Select-Object -expandproperty name)){
+                $attachments = $attachments + [System.Web.HttpUtility]::UrlDecode($attachment) + "`n"
             }
             $checklists = ""
-            if ($null -ne $taskdetails.checklist) {
+            if($null -ne $taskdetails.checklist){
                 foreach ($check in ($taskdetails.checklist | get-member -type noteproperty)) {
                     $checkobj = $taskdetails.checklist.($check.name)
-                    if ($checkobj.isChecked) { $checklists = $checklists + "Completed - "; }
+                    if ($checkobj.isChecked){$checklists = $checklists + "Completed - ";}
                     $checklists = $checklists + $checkobj.title + "`n"
                 }
             }
-            if ($null -ne $task.createdby) { $taskcreatedby = $usertable[$task.createdBy.user.id] } else { $taskcreatedby = "" }
-            if ($null -ne $task.completedby) { $taskcompletedby = $usertable[$task.completedBy.user.id] } else { $taskcreatedby = "" }
+            if($null -ne $task.createdby){$taskcreatedby = $usertable[$task.createdBy.user.id]} else {$taskcreatedby = ""}
+            if($null -ne $task.completedby){$taskcompletedby = $usertable[$task.completedBy.user.id]} else {$taskcreatedby = ""}
             #Comments thread
-            if ($null -ne $task.conversationThreadId) { $taskthread = "=HYPERLINK(`"comments\" + $task.id + "-comments.html`")" } else { $taskthread = "" }
+            if($null -ne $task.conversationThreadId){$taskthread = "=HYPERLINK(`"comments\" + $task.id + "-comments.html`")"} else {$taskthread = ""}
             $labels = ""
-            foreach ($category in ($task.appliedcategories | get-member -type noteproperty | Select-Object -expandproperty name)) {
-                if ($plandetails.categoryDescriptions.$category -ne "") {
+            foreach($category in ($task.appliedcategories | get-member -type noteproperty | Select-Object -expandproperty name)){
+                if($plandetails.categoryDescriptions.$category -ne ""){
                     $labels = $labels + $plandetails.categoryDescriptions.$category + "`n"
-                }
-                else {
+                } else {
                     $labels = $labels + $defaultcategories.categoryDescriptions.$category + "`n"
                 }
             }
 
 
             $exporttask = [PSCustomObject]@{
-                taskID        = $taskid
-                taskName      = $tasktitle
-                description   = $taskdescription
-                bucketName    = $bucketname
-                progress      = $taskpercentComplete
-                Priority      = $taskPriority
-                assignedTo    = $assignments
-                createdBy     = $taskcreatedby
-                createdDate   = $taskcreateddate
-                startDate     = $taskstartdate
-                dueDate       = $taskduedate
+                taskID = $taskid
+                taskName = $tasktitle
+                description = $taskdescription
+                bucketName = $bucketname
+                progress = $taskpercentComplete
+                Priority = $taskPriority
+                assignedTo = $assignments
+                createdBy = $taskcreatedby
+                createdDate = $taskcreateddate
+                startDate = $taskstartdate
+                dueDate = $taskduedate
                 completedDate = $taskcompleteddate
-                completedBy   = $taskcompletedby
-                threadid      = $taskthread
-                attachments   = $attachments
+                completedBy = $taskcompletedby
+                threadid = $taskthread
+                attachments = $attachments
                 #threadExport
-                checklist     = $checklists
-                labels        = $labels
+                checklist = $checklists
+                labels = $labels
             }
 
             $exporttasks = $exporttasks + $exporttask
             $i++;
-            start-sleep -m 750
+            #start-sleep -m 750
         }
         #write-host $exporttasks
         $exporttasks | Export-excel -path "c:\plannermigrator\exportdirectory\$($planname)\$($planname).xlsx" -autosize -autonamerange -worksheetname Plan
-
     }
 }
-start-main
+
+Start-Main
+
+
