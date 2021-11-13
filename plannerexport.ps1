@@ -1,6 +1,6 @@
 function Start-Main {
-$clientid = 'a59882b1-b19b-4a4b-a97a-3cb3b4b7ae89'
-$tenantid = '63ec59cb-94a2-4e6b-8090-be2f81176596'
+$clientid = 'CLIENTID'
+$tenantid = 'TENANTID'
 
 $token = GetDelegatedGraphToken -clientid $clientid -tenantid $tenantid
 $groups = listgroups -token $token
