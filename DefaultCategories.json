@@ -1,0 +1,29 @@
+{
+    "categoryDescriptions":  {
+                                 "category1":  "Pink",
+                                 "category2":  "Red",
+                                 "category3":  "Yellow",
+                                 "category4":  "Green",
+                                 "category5":  "Blue",
+                                 "category6":  "Purple",
+                                 "category7":  "Bronze",
+                                 "category8":  "Lime",
+                                 "category9":  "Aqua",
+                                 "category10":  "Gray",
+                                 "category11":  "Silver",
+                                 "category12":  "Brown",
+                                 "category13":  "Cranberry",
+                                 "category14":  "Orange",
+                                 "category15":  "Peach",
+                                 "category16":  "Marigold",
+                                 "category17":  "Light Green",
+                                 "category18":  "Dark Green",
+                                 "category19":  "Teal",
+                                 "category20":  "Light Blue",
+                                 "category21":  "Dark Blue",
+                                 "category22":  "Lavender",
+                                 "category23":  "Plum",
+                                 "category24":  "Light Gray",
+                                 "category25":  "Dark Gray"
+                             }
+}
